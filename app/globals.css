@@ -106,3 +106,105 @@ button:hover {
   flex: 1;
   min-width: 120px;
 }
+/* --- เพิ่มสำหรับหน้า /sell (ตะกร้าสินค้า) --- */
+
+.sell-summary-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #1a1a1a;
+  color: #fff;
+  padding: 16px 24px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sell-summary-label {
+  font-size: 13px;
+  color: #bbb;
+  margin-bottom: 2px;
+}
+
+.sell-summary-total {
+  font-size: 36px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.sell-confirm-btn {
+  background-color: #2ecc71;
+  color: #fff;
+  font-size: 16px;
+  padding: 14px 28px;
+  border-radius: 8px;
+}
+
+.sell-confirm-btn:hover {
+  background-color: #27ae60;
+}
+
+.sell-confirm-btn:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.sell-layout {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 800px) {
+  .sell-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.product-card {
+  text-align: left;
+  background-color: #fafafa;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  color: #222;
+}
+
+.product-card:hover:not(:disabled) {
+  background-color: #eee;
+  border-color: #aaa;
+}
+
+.product-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.product-card-name {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.product-card-price {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.product-card-stock {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
