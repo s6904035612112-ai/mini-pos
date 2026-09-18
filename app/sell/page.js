@@ -3,15 +3,13 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
+// เกณฑ์แจ้งเตือนสต๊อกใกล้หมด
+const LOW_STOCK_THRESHOLD = 5;
+
 export default function SellPage() {
-  // รายการสินค้าทั้งหมด (สำหรับเลือกใส่ตะกร้า)
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // ตะกร้าสินค้าที่กำลังจะขาย: [{ productId, sku, name, price, unit, stock, quantity }]
   const [cart, setCart] = useState([]);
-
-  // สถานะข้อความแจ้งเตือน/ยืนยัน
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -35,13 +33,11 @@ export default function SellPage() {
     setLoading(false);
   }
 
-  // ยอดรวมทั้งหมดในตะกร้า
   const grandTotal = cart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
   );
 
-  // เพิ่มสินค้าลงตะกร้า (ถ้ามีอยู่แล้วให้เพิ่มจำนวนขึ้น 1 โดยไม่เกิน stock)
   function addToCart(product) {
     setErrorMsg("");
     setSuccessMsg("");
@@ -79,7 +75,6 @@ export default function SellPage() {
     });
   }
 
-  // แก้จำนวนสินค้าในตะกร้า (คุมไม่ให้ต่ำกว่า 1 หรือเกิน stock)
   function updateQuantity(productId, rawValue) {
     setErrorMsg("");
     const item = cart.find((i) => i.productId === productId);
@@ -105,7 +100,50 @@ export default function SellPage() {
     setCart([]);
   }
 
-  // ยืนยันการขายทั้งตะกร้า
+  // ส่งข้อความแจ้งเตือนไป Telegram ผ่าน API route ของเราเอง (ไม่ยิงตรงจาก client)
+  // ทำงานแบบ fire-and-forget: ถ้า error ก็แค่ log ไว้ ไม่ทำให้ระบบขายพัง
+  async function sendTelegramNotification(text) {
+    try {
+      const res = await fetch("/api/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        console.error("Telegram notify failed:", await res.text());
+      }
+    } catch (err) {
+      // ไม่ throw ต่อ เพื่อไม่ให้กระทบ flow การขาย
+      console.error("Telegram notify error:", err);
+    }
+  }
+
+  // สร้างข้อความแจ้งเตือน Order ใหม่ (รูปแบบ HTML ตามที่กำหนด)
+  function buildOrderMessage(item, newStock) {
+    const now = new Date().toLocaleString("th-TH", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    return (
+      `🛍️ <b>มีรายการขายใหม่!</b>\n` +
+      `- สินค้า: ${item.name}\n` +
+      `- จำนวน: ${item.quantity} ชิ้น\n` +
+      `- ราคารวม: ${(item.price * item.quantity).toFixed(2)} บาท\n` +
+      `- สต๊อกคงเหลือปัจจุบัน: ${newStock} ชิ้น\n` +
+      `- เวลา: ${now}`
+    );
+  }
+
+  // สร้างข้อความแจ้งเตือนสต๊อกใกล้หมด
+  function buildLowStockMessage(item, newStock) {
+    return (
+      `🚨 <b>[เตือนภัย] สต๊อกสินค้าใกล้หมด!</b>\n` +
+      `- สินค้า: ${item.name}\n` +
+      `- คงเหลือเพียง: ${newStock} ชิ้น\n` +
+      `⚠️ กรุณาเติมสต๊อกสินค้าด่วน!`
+    );
+  }
+
   async function handleConfirmSale() {
     setErrorMsg("");
     setSuccessMsg("");
@@ -115,7 +153,6 @@ export default function SellPage() {
       return;
     }
 
-    // ตรวจสอบ stock อีกครั้งก่อนบันทึกจริง (กันกรณีสต๊อกเปลี่ยนระหว่างเลือกสินค้า)
     for (const item of cart) {
       const current = products.find((p) => p.id === item.productId);
       if (!current || item.quantity > current.stock) {
@@ -127,7 +164,6 @@ export default function SellPage() {
     setSubmitting(true);
     const soldAt = new Date().toISOString();
 
-    // 1) บันทึกทุกรายการในตะกร้าลงตาราง sales (แถวละ 1 สินค้า)
     const salesRows = cart.map((item) => ({
       product_id: item.productId,
       product_name: item.name,
@@ -143,10 +179,12 @@ export default function SellPage() {
       return;
     }
 
-    // 2) อัปเดต stock ของแต่ละสินค้าให้ลดลงตามจำนวนที่ขาย
+    // อัปเดต stock ของแต่ละสินค้า พร้อมเก็บ stock ใหม่ไว้ใช้แจ้งเตือน
+    const updatedStocks = []; // [{ item, newStock }]
     for (const item of cart) {
       const current = products.find((p) => p.id === item.productId);
       const newStock = (current?.stock ?? item.stock) - item.quantity;
+
       const { error: updateError } = await supabase
         .from("products")
         .update({ stock: newStock })
@@ -158,19 +196,30 @@ export default function SellPage() {
         fetchProducts();
         return;
       }
+
+      updatedStocks.push({ item, newStock });
     }
 
+    // ตัดสต๊อกสำเร็จแล้ว -> แสดงผลสำเร็จในเว็บทันที ไม่ต้องรอ Telegram
     setSuccessMsg(
       `ขายสำเร็จ ${cart.length} รายการ รวม ${grandTotal.toFixed(2)} บาท`
     );
     clearCart();
     setSubmitting(false);
     fetchProducts();
+
+    // ยิงแจ้งเตือน Telegram แบบ async แยกออกไป ไม่ await ให้บล็อก UI
+    // และห่อด้วย try-catch ในตัวฟังก์ชันแล้ว จึง error ที่นี่ไม่กระทบระบบขาย
+    for (const { item, newStock } of updatedStocks) {
+      sendTelegramNotification(buildOrderMessage(item, newStock));
+      if (newStock <= LOW_STOCK_THRESHOLD) {
+        sendTelegramNotification(buildLowStockMessage(item, newStock));
+      }
+    }
   }
 
   return (
     <div>
-      {/* แถบสรุปยอดรวม ตรึงไว้ด้านบน ตัวใหญ่ ให้เห็นชัดทั้งฝั่งผู้ขายและลูกค้า */}
       <div className="sell-summary-bar">
         <div>
           <div className="sell-summary-label">ยอดรวมทั้งหมด</div>
@@ -196,7 +245,6 @@ export default function SellPage() {
         <p>กำลังโหลดข้อมูลสินค้า...</p>
       ) : (
         <div className="sell-layout">
-          {/* ฝั่งซ้าย: รายการสินค้าให้กดเพิ่มลงตะกร้า */}
           <div className="card">
             <h2 style={{ marginTop: 0 }}>เลือกสินค้า</h2>
             <div className="product-grid">
@@ -218,7 +266,6 @@ export default function SellPage() {
             </div>
           </div>
 
-          {/* ฝั่งขวา: ตะกร้าสินค้าที่จะขาย */}
           <div className="card">
             <h2 style={{ marginTop: 0 }}>ตะกร้าสินค้า</h2>
             {cart.length === 0 ? (
